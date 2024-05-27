@@ -540,7 +540,7 @@ func (r *gcpForwaringdRule) createWithNetwork(ctx context.Context, fwRule *compu
 		Project: resourceInfo.Project,
 		Region:  resourceInfo.Region,
 		AddressResource: &computepb.Address{
-			Name:        proto.String("foo-ip"),
+			Name:        proto.String(getAddressName(resourceInfo.Namespace, resourceInfo.Name)),
 			IpVersion:   proto.String("IPV4"),
 			AddressType: proto.String("INTERNAL"),
 			Purpose:     proto.String("GCE_ENDPOINT"),
@@ -564,8 +564,9 @@ func (r *gcpForwaringdRule) createWithNetwork(ctx context.Context, fwRule *compu
 		return "", "", fmt.Errorf("unable to wait for the operation: %w", err)
 	}
 
+	// Generate address name based on forwarding rule name
 	fwRule.ForwardingRuleResource.IPAddress = proto.String(getAddressUrl(resourceInfo.Project,
-		resourceInfo.Region, *proto.String("foo-ip")))
+		resourceInfo.Region, *proto.String(getAddressName(resourceInfo.Namespace, resourceInfo.Name))))
 
 	// Insert forwarding rule
 	insertForwardingRuleOp, err := r.client.Insert(ctx, fwRule)
