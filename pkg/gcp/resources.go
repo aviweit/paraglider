@@ -148,6 +148,8 @@ func getResourceHandlerFromDescription(resourceDesc []byte) (iGCPResourceHandler
 		return &gcpInstance{}, nil
 	} else if err := json.Unmarshal(resourceDesc, createClusterRequest); err == nil {
 		return &gcpGKE{}, nil
+	} else if err := json.Unmarshal(resourceDesc, insertForwardingRuleRequest); err == nil {
+		return &gcpInstance{}, nil
 	} else {
 		return nil, fmt.Errorf("resource description contains unknown GCP resource")
 	}
