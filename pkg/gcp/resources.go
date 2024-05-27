@@ -532,11 +532,13 @@ func (r *gcpForwaringdRule) createWithNetwork(ctx context.Context, fwRule *compu
 	// Set project and name
 	fwRule.Project = resourceInfo.Project
 	fwRule.ForwardingRuleResource.Name = proto.String(resourceInfo.Name)
-	fwRule.ForwardingRuleResource.Subnetwork = proto.String(getSubnetworkUrl(resourceInfo.Project, resourceInfo.Region, subnetName))
+	fwRule.ForwardingRuleResource.Subnetwork = proto.String(getSubnetworkUrl(resourceInfo.Project,
+		resourceInfo.Region, subnetName))
 
 	// Allocate ipaddress for forwarding rule
 	insertAddressRequest := &computepb.InsertAddressRequest{
 		Project: resourceInfo.Project,
+		Region:  resourceInfo.Region,
 		AddressResource: &computepb.Address{
 			Name:        proto.String("foo-ip"),
 			IpVersion:   proto.String("IPV4"),
@@ -561,6 +563,9 @@ func (r *gcpForwaringdRule) createWithNetwork(ctx context.Context, fwRule *compu
 	if err = insertAddressOp.Wait(ctx); err != nil {
 		return "", "", fmt.Errorf("unable to wait for the operation: %w", err)
 	}
+
+	fwRule.ForwardingRuleResource.IPAddress = proto.String(getAddressUrl(resourceInfo.Project,
+		resourceInfo.Region, *proto.String("foo-ip")))
 
 	// Insert forwarding rule
 	insertForwardingRuleOp, err := r.client.Insert(ctx, fwRule)

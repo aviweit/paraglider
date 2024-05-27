@@ -50,6 +50,11 @@ func GetVpcUrl(project string, namespace string) string {
 	return computeUrlPrefix + fmt.Sprintf("projects/%s/global/networks/%s", project, getVpcName(namespace))
 }
 
+// getAddressUrl returns a fully qualified URL for an address
+func getAddressUrl(project string, region string, name string) string {
+	return computeUrlPrefix + fmt.Sprintf("projects/%s/regions/%s/addresses/%s", project, region, name)
+}
+
 // Creates bi-directional peering between two VPC networks
 func peerVpcNetwork(ctx context.Context, networksClient *compute.NetworksClient, currentProject string, currentNamespace string, peerProject string, peerNamespace string) error {
 	// Check if peering already exists
