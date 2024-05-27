@@ -532,6 +532,7 @@ func (r *gcpForwaringdRule) createWithNetwork(ctx context.Context, fwRule *compu
 	// Set project and name
 	fwRule.Project = resourceInfo.Project
 	fwRule.ForwardingRuleResource.Name = proto.String(resourceInfo.Name)
+	fwRule.ForwardingRuleResource.Subnetwork = proto.String(getSubnetworkUrl(resourceInfo.Project, resourceInfo.Region, subnetName))
 
 	// Insert forwarding rule
 	insertForwardingRuleOp, err := r.client.Insert(ctx, fwRule)
