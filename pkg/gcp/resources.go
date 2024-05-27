@@ -529,18 +529,19 @@ func (r *gcpForwaringdRule) fromResourceDecription(resourceDesc []byte) (*comput
 // Create a GCP instance with network settings
 // Returns the instance URL and instance IP
 func (r *gcpForwaringdRule) createWithNetwork(ctx context.Context, fwRule *computepb.InsertForwardingRuleRequest, subnetName string, resourceInfo *resourceInfo, firewallsClient *compute.FirewallsClient, addressesClient *compute.AddressesClient) (string, string, error) {
-	// Set project and name
+	// forwardingRuleName := *fwRule.ForwardingRuleResource.Name
+	addressName := getAddressName(resourceInfo.Namespace, resourceInfo.Name)
+
 	fwRule.Project = resourceInfo.Project
 	fwRule.ForwardingRuleResource.Name = proto.String(resourceInfo.Name)
-	fwRule.ForwardingRuleResource.Subnetwork = proto.String(getSubnetworkUrl(resourceInfo.Project,
-		resourceInfo.Region, subnetName))
+	fwRule.ForwardingRuleResource.Subnetwork = proto.String(getSubnetworkUrl(resourceInfo.Project, resourceInfo.Region, subnetName))
 
 	// Allocate ipaddress for forwarding rule
 	insertAddressRequest := &computepb.InsertAddressRequest{
 		Project: resourceInfo.Project,
 		Region:  resourceInfo.Region,
 		AddressResource: &computepb.Address{
-			Name:        proto.String(getAddressName(resourceInfo.Namespace, resourceInfo.Name)),
+			Name:        proto.String(addressName),
 			IpVersion:   proto.String("IPV4"),
 			AddressType: proto.String("INTERNAL"),
 			Purpose:     proto.String("GCE_ENDPOINT"),
@@ -548,14 +549,7 @@ func (r *gcpForwaringdRule) createWithNetwork(ctx context.Context, fwRule *compu
 		},
 	}
 
-	// insertAddressRequest.Project = resourceInfo.Project
-	// insertAddressRequest.AddressResource.Name = proto.String("foo-ip")
-	// insertAddressRequest.AddressResource.IpVersion = proto.String("IPV4")
-	// insertAddressRequest.AddressResource.AddressType = proto.String("INTERNAL")
-	// insertAddressRequest.AddressResource.Purpose = proto.String("GCE_ENDPOINT")
-	// insertAddressRequest.AddressResource.Subnetwork = fwRule.ForwardingRuleResource.Subnetwork
-
-	// Insert ipaddress (automatically allocated)
+	// Insert address (ip address is automatically allocated)
 	insertAddressOp, err := addressesClient.Insert(ctx, insertAddressRequest)
 	if err != nil {
 		return "", "", fmt.Errorf("unable to allocated ipaddress for forwarding rule: %w", err)
@@ -564,9 +558,8 @@ func (r *gcpForwaringdRule) createWithNetwork(ctx context.Context, fwRule *compu
 		return "", "", fmt.Errorf("unable to wait for the operation: %w", err)
 	}
 
-	// Generate address name based on forwarding rule name
-	fwRule.ForwardingRuleResource.IPAddress = proto.String(getAddressUrl(resourceInfo.Project,
-		resourceInfo.Region, *proto.String(getAddressName(resourceInfo.Namespace, resourceInfo.Name))))
+	// Set with address Url
+	fwRule.ForwardingRuleResource.IPAddress = proto.String(getAddressUrl(resourceInfo.Project, resourceInfo.Region, *proto.String(addressName)))
 
 	// Insert forwarding rule
 	insertForwardingRuleOp, err := r.client.Insert(ctx, fwRule)
@@ -577,7 +570,19 @@ func (r *gcpForwaringdRule) createWithNetwork(ctx context.Context, fwRule *compu
 		return "", "", fmt.Errorf("unable to wait for the operation: %w", err)
 	}
 
-	return "", "10.10.10.10", nil
+	// Get forwarding rule
+	getForwardingRuleReq := &computepb.GetForwardingRuleRequest{
+		ForwardingRule: resourceInfo.Name,
+		Project:        resourceInfo.Project,
+		Region:         resourceInfo.Region,
+	}
+
+	getForwardingRuleResp, err := r.client.Get(ctx, getForwardingRuleReq)
+	if err != nil {
+		return "", "", fmt.Errorf("unable to get address: %w", err)
+	}
+
+	return getForwardingRuleUrl(resourceInfo.Project, resourceInfo.Region, resourceInfo.Name), *getForwardingRuleResp.IPAddress, nil
 	//return getInstanceUrl(resourceInfo.Project, resourceInfo.Zone, instanceName), *getInstanceResp.NetworkInterfaces[0].NetworkIP, nil
 }
 
@@ -600,4 +605,9 @@ func getInstanceUrl(project, zone, instance string) string {
 // getClusterUrl returns a fully qualified URL for a cluster
 func getClusterUrl(project, zone, cluster string) string {
 	return containerUrlPrefix + fmt.Sprintf("projects/%s/locations/%s/clusters/%s", project, zone, cluster)
+}
+
+// getForwardingRuleUrl returns a fully qualified URL for a forwarding rule
+func getForwardingRuleUrl(project, region, fwInstance string) string {
+	return computeUrlPrefix + fmt.Sprintf("projects/%s/regions/%s/forwardingRules/%s", project, region, fwInstance)
 }
