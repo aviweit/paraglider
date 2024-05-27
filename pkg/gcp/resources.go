@@ -148,6 +148,7 @@ func getResourceHandlerFromDescription(resourceDesc []byte) (iGCPResourceHandler
 		return &gcpForwaringdRule{}, nil
 	} else if err := json.Unmarshal(resourceDesc, createClusterRequest); err == nil {
 		return &gcpGKE{}, nil
+		// TODO: !!!!!!!!!!!!! REMOVE !!!!!!!!!!!!
 	} else if err := json.Unmarshal(resourceDesc, insertForwardingRuleRequest); err == nil {
 		return &gcpInstance{}, nil
 	} else {
@@ -191,12 +192,12 @@ func IsValidResource(ctx context.Context, resource *paragliderpb.CreateResourceR
 }
 
 // Read the resource description and provision the resource
-func ReadAndProvisionResource(ctx context.Context, resource *paragliderpb.CreateResourceRequest, subnetName string, resourceInfo *resourceInfo, instanceClient *compute.InstancesClient, forwardingRulesClient *compute.ForwardingRulesClient, clusterClient *container.ClusterManagerClient, firewallsClient *compute.FirewallsClient, additionalAddrSpaces []string) (string, string, error) {
+func ReadAndProvisionResource(ctx context.Context, resource *paragliderpb.CreateResourceRequest, subnetName string, resourceInfo *resourceInfo, instanceClient *compute.InstancesClient, forwardingRulesClient *compute.ForwardingRulesClient, clusterClient *container.ClusterManagerClient, firewallsClient *compute.FirewallsClient, addressesClient *compute.AddressesClient, additionalAddrSpaces []string) (string, string, error) {
 	handler, err := getResourceHandlerWithClient(resourceInfo.ResourceType, instanceClient, forwardingRulesClient, clusterClient)
 	if err != nil {
 		return "", "", fmt.Errorf("unable to get resource handler: %w", err)
 	}
-	return handler.readAndProvisionResource(ctx, resource, subnetName, resourceInfo, firewallsClient, additionalAddrSpaces)
+	return handler.readAndProvisionResource(ctx, resource, subnetName, resourceInfo, firewallsClient, addressesClient, additionalAddrSpaces)
 }
 
 // Type defition for supported resources
@@ -207,7 +208,7 @@ type supportedGCPResourceClient interface {
 // Interface to implement to support a resource
 type iGCPResourceHandler interface {
 	// Read and provision the resource with the provided subnet
-	readAndProvisionResource(ctx context.Context, resource *paragliderpb.CreateResourceRequest, subnetName string, resourceInfo *resourceInfo, firewallsClient *compute.FirewallsClient, additionalAddrSpaces []string) (string, string, error)
+	readAndProvisionResource(ctx context.Context, resource *paragliderpb.CreateResourceRequest, subnetName string, resourceInfo *resourceInfo, firewallsClient *compute.FirewallsClient, addressClient *compute.AddressesClient, additionalAddrSpaces []string) (string, string, error)
 	// Get network information about the resource
 	getNetworkInfo(ctx context.Context, resourceInfo *resourceInfo) (*resourceNetworkInfo, error)
 	// Get information about the reosurce from the resource description
@@ -236,7 +237,7 @@ func (r *gcpInstance) getResourceInfo(ctx context.Context, resource *paragliderp
 }
 
 // Read and provision a GCP instance
-func (r *gcpInstance) readAndProvisionResource(ctx context.Context, resource *paragliderpb.CreateResourceRequest, subnetName string, resourceInfo *resourceInfo, firewallsClient *compute.FirewallsClient, additionalAddrSpaces []string) (string, string, error) {
+func (r *gcpInstance) readAndProvisionResource(ctx context.Context, resource *paragliderpb.CreateResourceRequest, subnetName string, resourceInfo *resourceInfo, firewallsClient *compute.FirewallsClient, addressClient *compute.AddressesClient, additionalAddrSpaces []string) (string, string, error) {
 	vm, err := r.fromResourceDecription(resource.Description)
 	if err != nil {
 		return "", "", err
@@ -347,7 +348,7 @@ type gcpGKE struct {
 }
 
 // Read and provision a GCP cluster
-func (r *gcpGKE) readAndProvisionResource(ctx context.Context, resource *paragliderpb.CreateResourceRequest, subnetName string, resourceInfo *resourceInfo, firewallsClient *compute.FirewallsClient, additionalAddrSpaces []string) (string, string, error) {
+func (r *gcpGKE) readAndProvisionResource(ctx context.Context, resource *paragliderpb.CreateResourceRequest, subnetName string, resourceInfo *resourceInfo, firewallsClient *compute.FirewallsClient, addressClient *compute.AddressesClient, additionalAddrSpaces []string) (string, string, error) {
 	gke, err := r.fromResourceDecription(resource.Description)
 	if err != nil {
 		return "", "", err
@@ -513,7 +514,6 @@ func (r *gcpForwaringdRule) getResourceInfo(ctx context.Context, resource *parag
 		return nil, fmt.Errorf("unable to parse resource description: %w", err)
 	}
 	return &resourceInfo{Region: insertForwardingRuleRequest.Region, NumAdditionalAddressSpaces: 1, ResourceType: forwardingRuleTypeName}, nil
-	//return &resourceInfo{Zone: insertInstanceRequest.Zone, NumAdditionalAddressSpaces: r.getNumberAddressSpacesRequired(), ResourceType: instanceTypeName}, nil
 }
 
 // Parse the resource description and return the instance request
@@ -528,11 +528,39 @@ func (r *gcpForwaringdRule) fromResourceDecription(resourceDesc []byte) (*comput
 
 // Create a GCP instance with network settings
 // Returns the instance URL and instance IP
-func (r *gcpForwaringdRule) createWithNetwork(ctx context.Context, fwRule *computepb.InsertForwardingRuleRequest, subnetName string, resourceInfo *resourceInfo, firewallsClient *compute.FirewallsClient) (string, string, error) {
+func (r *gcpForwaringdRule) createWithNetwork(ctx context.Context, fwRule *computepb.InsertForwardingRuleRequest, subnetName string, resourceInfo *resourceInfo, firewallsClient *compute.FirewallsClient, addressesClient *compute.AddressesClient) (string, string, error) {
 	// Set project and name
 	fwRule.Project = resourceInfo.Project
 	fwRule.ForwardingRuleResource.Name = proto.String(resourceInfo.Name)
 	fwRule.ForwardingRuleResource.Subnetwork = proto.String(getSubnetworkUrl(resourceInfo.Project, resourceInfo.Region, subnetName))
+
+	// Allocate ipaddress for forwarding rule
+	insertAddressRequest := &computepb.InsertAddressRequest{
+		Project: resourceInfo.Project,
+		AddressResource: &computepb.Address{
+			Name:        proto.String("foo-ip"),
+			IpVersion:   proto.String("IPV4"),
+			AddressType: proto.String("INTERNAL"),
+			Purpose:     proto.String("GCE_ENDPOINT"),
+			Subnetwork:  fwRule.ForwardingRuleResource.Subnetwork,
+		},
+	}
+
+	// insertAddressRequest.Project = resourceInfo.Project
+	// insertAddressRequest.AddressResource.Name = proto.String("foo-ip")
+	// insertAddressRequest.AddressResource.IpVersion = proto.String("IPV4")
+	// insertAddressRequest.AddressResource.AddressType = proto.String("INTERNAL")
+	// insertAddressRequest.AddressResource.Purpose = proto.String("GCE_ENDPOINT")
+	// insertAddressRequest.AddressResource.Subnetwork = fwRule.ForwardingRuleResource.Subnetwork
+
+	// Insert ipaddress (automatically allocated)
+	insertAddressOp, err := addressesClient.Insert(ctx, insertAddressRequest)
+	if err != nil {
+		return "", "", fmt.Errorf("unable to allocated ipaddress for forwarding rule: %w", err)
+	}
+	if err = insertAddressOp.Wait(ctx); err != nil {
+		return "", "", fmt.Errorf("unable to wait for the operation: %w", err)
+	}
 
 	// Insert forwarding rule
 	insertForwardingRuleOp, err := r.client.Insert(ctx, fwRule)
@@ -548,13 +576,13 @@ func (r *gcpForwaringdRule) createWithNetwork(ctx context.Context, fwRule *compu
 }
 
 // Read and provision a GCP forwardingRule
-func (r *gcpForwaringdRule) readAndProvisionResource(ctx context.Context, resource *paragliderpb.CreateResourceRequest, subnetName string, resourceInfo *resourceInfo, firewallsClient *compute.FirewallsClient, additionalAddrSpaces []string) (string, string, error) {
+func (r *gcpForwaringdRule) readAndProvisionResource(ctx context.Context, resource *paragliderpb.CreateResourceRequest, subnetName string, resourceInfo *resourceInfo, firewallsClient *compute.FirewallsClient, addressesClient *compute.AddressesClient, additionalAddrSpaces []string) (string, string, error) {
 	print("In gcpForwaringdRule.readAndProvisionResource")
 	fw, err := r.fromResourceDecription(resource.Description)
 	if err != nil {
 		return "", "", err
 	}
-	return r.createWithNetwork(ctx, fw, subnetName, resourceInfo, firewallsClient)
+	return r.createWithNetwork(ctx, fw, subnetName, resourceInfo, firewallsClient, addressesClient)
 	//return "/fake/url/foo", "10.10.10.10", nil
 }
 

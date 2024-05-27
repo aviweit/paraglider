@@ -361,10 +361,16 @@ func (s *GCPPluginServer) CreateResource(ctx context.Context, resourceDescriptio
 	}
 	defer clustersClient.Close()
 
-	return s._CreateResource(ctx, resourceDescription, instancesClient, forwardingRulesClient, networksClient, subnetworksClient, firewallsClient, clustersClient)
+	addressesClient, err := compute.NewAddressesRESTClient(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("NewAddressesRESTClient: %w", err)
+	}
+	defer addressesClient.Close()
+
+	return s._CreateResource(ctx, resourceDescription, instancesClient, forwardingRulesClient, networksClient, subnetworksClient, firewallsClient, clustersClient, addressesClient)
 }
 
-func (s *GCPPluginServer) _CreateResource(ctx context.Context, resourceDescription *paragliderpb.CreateResourceRequest, instancesClient *compute.InstancesClient, forwardingRulesClient *compute.ForwardingRulesClient, networksClient *compute.NetworksClient, subnetworksClient *compute.SubnetworksClient, firewallsClient *compute.FirewallsClient, clustersClient *container.ClusterManagerClient) (*paragliderpb.CreateResourceResponse, error) {
+func (s *GCPPluginServer) _CreateResource(ctx context.Context, resourceDescription *paragliderpb.CreateResourceRequest, instancesClient *compute.InstancesClient, forwardingRulesClient *compute.ForwardingRulesClient, networksClient *compute.NetworksClient, subnetworksClient *compute.SubnetworksClient, firewallsClient *compute.FirewallsClient, clustersClient *container.ClusterManagerClient, addressesClient *compute.AddressesClient) (*paragliderpb.CreateResourceResponse, error) {
 	project := parseUrl(resourceDescription.Deployment.Id)["projects"]
 
 	// Read and validate user-provided description
@@ -500,7 +506,7 @@ func (s *GCPPluginServer) _CreateResource(ctx context.Context, resourceDescripti
 	}
 
 	// Read and provision the resource
-	url, ip, err := ReadAndProvisionResource(ctx, resourceDescription, subnetName, resourceInfo, instancesClient, forwardingRulesClient, clustersClient, firewallsClient, addressSpaces)
+	url, ip, err := ReadAndProvisionResource(ctx, resourceDescription, subnetName, resourceInfo, instancesClient, forwardingRulesClient, clustersClient, firewallsClient, addressesClient, addressSpaces)
 
 	if err != nil {
 		return nil, fmt.Errorf("unable to read and provision resource: %w", err)
