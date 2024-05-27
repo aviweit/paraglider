@@ -52,23 +52,29 @@ func (s *GCPPluginServer) GetPermitList(ctx context.Context, req *paragliderpb.G
 	}
 	defer instancesClient.Close()
 
+	forwardingRulesClient, err := compute.NewForwardingRulesRESTClient(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("NewForwardingRulesRESTClient: %w", err)
+	}
+	defer forwardingRulesClient.Close()
+
 	clustersClient, err := container.NewClusterManagerClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("NewClusterManagerClient: %w", err)
 	}
 	defer clustersClient.Close()
 
-	return s._GetPermitList(ctx, req, firewallsClient, instancesClient, clustersClient)
+	return s._GetPermitList(ctx, req, firewallsClient, instancesClient, forwardingRulesClient, clustersClient)
 }
 
-func (s *GCPPluginServer) _GetPermitList(ctx context.Context, req *paragliderpb.GetPermitListRequest, firewallsClient *compute.FirewallsClient, instancesClient *compute.InstancesClient, clustersClient *container.ClusterManagerClient) (*paragliderpb.GetPermitListResponse, error) {
+func (s *GCPPluginServer) _GetPermitList(ctx context.Context, req *paragliderpb.GetPermitListRequest, firewallsClient *compute.FirewallsClient, instancesClient *compute.InstancesClient, forwardingRulesClient *compute.ForwardingRulesClient, clustersClient *container.ClusterManagerClient) (*paragliderpb.GetPermitListResponse, error) {
 	resourceInfo, err := parseResourceUrl(req.Resource)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse resource URL: %w", err)
 	}
 	resourceInfo.Namespace = req.Namespace
 
-	_, resourceID, err := GetResourceNetworkInfo(ctx, instancesClient, clustersClient, resourceInfo)
+	_, resourceID, err := GetResourceNetworkInfo(ctx, instancesClient, forwardingRulesClient, clustersClient, resourceInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -107,6 +113,12 @@ func (s *GCPPluginServer) AddPermitListRules(ctx context.Context, req *paraglide
 	}
 	defer instancesClient.Close()
 
+	forwardingRulesClient, err := compute.NewForwardingRulesRESTClient(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("NewForwardingRulesRESTClient: %w", err)
+	}
+	defer forwardingRulesClient.Close()
+
 	clustersClient, err := container.NewClusterManagerClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("NewClusterManagerClient: %w", err)
@@ -124,17 +136,17 @@ func (s *GCPPluginServer) AddPermitListRules(ctx context.Context, req *paraglide
 	}
 	defer networksClient.Close()
 
-	return s._AddPermitListRules(ctx, req, firewallsClient, instancesClient, subnetworksClient, networksClient, clustersClient)
+	return s._AddPermitListRules(ctx, req, firewallsClient, instancesClient, forwardingRulesClient, subnetworksClient, networksClient, clustersClient)
 }
 
-func (s *GCPPluginServer) _AddPermitListRules(ctx context.Context, req *paragliderpb.AddPermitListRulesRequest, firewallsClient *compute.FirewallsClient, instancesClient *compute.InstancesClient, subnetworksClient *compute.SubnetworksClient, networksClient *compute.NetworksClient, clustersClient *container.ClusterManagerClient) (*paragliderpb.AddPermitListRulesResponse, error) {
+func (s *GCPPluginServer) _AddPermitListRules(ctx context.Context, req *paragliderpb.AddPermitListRulesRequest, firewallsClient *compute.FirewallsClient, instancesClient *compute.InstancesClient, forwardingRulesClient *compute.ForwardingRulesClient, subnetworksClient *compute.SubnetworksClient, networksClient *compute.NetworksClient, clustersClient *container.ClusterManagerClient) (*paragliderpb.AddPermitListRulesResponse, error) {
 	resourceInfo, err := parseResourceUrl(req.Resource)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse resource URL: %w", err)
 	}
 	resourceInfo.Namespace = req.Namespace
 
-	_, resourceID, err := GetResourceNetworkInfo(ctx, instancesClient, clustersClient, resourceInfo)
+	_, resourceID, err := GetResourceNetworkInfo(ctx, instancesClient, forwardingRulesClient, clustersClient, resourceInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -272,23 +284,29 @@ func (s *GCPPluginServer) DeletePermitListRules(ctx context.Context, req *paragl
 	}
 	defer instancesClient.Close()
 
+	forwardingRulesClient, err := compute.NewForwardingRulesRESTClient(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("NewForwardingRulesRESTClient: %w", err)
+	}
+	defer forwardingRulesClient.Close()
+
 	clustersClient, err := container.NewClusterManagerClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("NewClusterManagerClient: %w", err)
 	}
 	defer clustersClient.Close()
 
-	return s._DeletePermitListRules(ctx, req, firewallsClient, instancesClient, clustersClient)
+	return s._DeletePermitListRules(ctx, req, firewallsClient, instancesClient, forwardingRulesClient, clustersClient)
 }
 
-func (s *GCPPluginServer) _DeletePermitListRules(ctx context.Context, req *paragliderpb.DeletePermitListRulesRequest, firewallsClient *compute.FirewallsClient, instancesClient *compute.InstancesClient, clustersClient *container.ClusterManagerClient) (*paragliderpb.DeletePermitListRulesResponse, error) {
+func (s *GCPPluginServer) _DeletePermitListRules(ctx context.Context, req *paragliderpb.DeletePermitListRulesRequest, firewallsClient *compute.FirewallsClient, instancesClient *compute.InstancesClient, forwardingRulesClient *compute.ForwardingRulesClient, clustersClient *container.ClusterManagerClient) (*paragliderpb.DeletePermitListRulesResponse, error) {
 	resourceInfo, err := parseResourceUrl(req.Resource)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse resource URL: %w", err)
 	}
 	resourceInfo.Namespace = req.Namespace
 
-	_, resourceID, err := GetResourceNetworkInfo(ctx, instancesClient, clustersClient, resourceInfo)
+	_, resourceID, err := GetResourceNetworkInfo(ctx, instancesClient, forwardingRulesClient, clustersClient, resourceInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -317,6 +335,11 @@ func (s *GCPPluginServer) CreateResource(ctx context.Context, resourceDescriptio
 		return nil, fmt.Errorf("NewInstancesRESTClient: %w", err)
 	}
 	defer instancesClient.Close()
+	forwardingRulesClient, err := compute.NewForwardingRulesRESTClient(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("NewForwardingRulesRESTClient: %w", err)
+	}
+	defer forwardingRulesClient.Close()
 	networksClient, err := compute.NewNetworksRESTClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("NewNetworksRESTClient: %w", err)
@@ -338,10 +361,10 @@ func (s *GCPPluginServer) CreateResource(ctx context.Context, resourceDescriptio
 	}
 	defer clustersClient.Close()
 
-	return s._CreateResource(ctx, resourceDescription, instancesClient, networksClient, subnetworksClient, firewallsClient, clustersClient)
+	return s._CreateResource(ctx, resourceDescription, instancesClient, forwardingRulesClient, networksClient, subnetworksClient, firewallsClient, clustersClient)
 }
 
-func (s *GCPPluginServer) _CreateResource(ctx context.Context, resourceDescription *paragliderpb.CreateResourceRequest, instancesClient *compute.InstancesClient, networksClient *compute.NetworksClient, subnetworksClient *compute.SubnetworksClient, firewallsClient *compute.FirewallsClient, clustersClient *container.ClusterManagerClient) (*paragliderpb.CreateResourceResponse, error) {
+func (s *GCPPluginServer) _CreateResource(ctx context.Context, resourceDescription *paragliderpb.CreateResourceRequest, instancesClient *compute.InstancesClient, forwardingRulesClient *compute.ForwardingRulesClient, networksClient *compute.NetworksClient, subnetworksClient *compute.SubnetworksClient, firewallsClient *compute.FirewallsClient, clustersClient *container.ClusterManagerClient) (*paragliderpb.CreateResourceResponse, error) {
 	project := parseUrl(resourceDescription.Deployment.Id)["projects"]
 
 	// Read and validate user-provided description
@@ -354,8 +377,12 @@ func (s *GCPPluginServer) _CreateResource(ctx context.Context, resourceDescripti
 	resourceInfo.Project = project
 	resourceInfo.Name = resourceDescription.Name
 
-	region := resourceInfo.Zone[:strings.LastIndex(resourceInfo.Zone, "-")]
-	resourceInfo.Region = region
+	if resourceInfo.Zone != "" {
+		region := resourceInfo.Zone[:strings.LastIndex(resourceInfo.Zone, "-")]
+		resourceInfo.Region = region
+	}
+	region := resourceInfo.Region
+
 	resourceInfo.Namespace = resourceDescription.Deployment.Namespace
 
 	subnetExists := false
@@ -473,7 +500,7 @@ func (s *GCPPluginServer) _CreateResource(ctx context.Context, resourceDescripti
 	}
 
 	// Read and provision the resource
-	url, ip, err := ReadAndProvisionResource(ctx, resourceDescription, subnetName, resourceInfo, instancesClient, clustersClient, firewallsClient, addressSpaces)
+	url, ip, err := ReadAndProvisionResource(ctx, resourceDescription, subnetName, resourceInfo, instancesClient, forwardingRulesClient, clustersClient, firewallsClient, addressSpaces)
 
 	if err != nil {
 		return nil, fmt.Errorf("unable to read and provision resource: %w", err)

@@ -118,7 +118,7 @@ func parseResourceUrl(resourceUrl string) (*resourceInfo, error) {
 }
 
 // Get the resource handler for a given resource type with the client field set
-func getResourceHandlerWithClient(resourceType string, instancesClient *compute.InstancesClient, clusterClient *container.ClusterManagerClient) (iGCPResourceHandler, error) {
+func getResourceHandlerWithClient(resourceType string, instancesClient *compute.InstancesClient, forwardingRulesClient *compute.ForwardingRulesClient, clusterClient *container.ClusterManagerClient) (iGCPResourceHandler, error) {
 	if resourceType == instanceTypeName {
 		handler := &gcpInstance{}
 		handler.client = instancesClient
@@ -129,7 +129,7 @@ func getResourceHandlerWithClient(resourceType string, instancesClient *compute.
 		return handler, nil
 	} else if resourceType == forwardingRuleTypeName {
 		handler := &gcpForwaringdRule{}
-		handler.client = instancesClient
+		handler.client = forwardingRulesClient
 		return handler, nil
 	} else {
 		return nil, fmt.Errorf("unknown resource type")
@@ -145,7 +145,7 @@ func getResourceHandlerFromDescription(resourceDesc []byte) (iGCPResourceHandler
 	if err == nil && insertInstanceRequest.InstanceResource != nil {
 		return &gcpInstance{}, nil
 	} else if err := json.Unmarshal(resourceDesc, insertForwardingRuleRequest); err == nil && insertForwardingRuleRequest.ForwardingRuleResource != nil {
-		return &gcpInstance{}, nil
+		return &gcpForwaringdRule{}, nil
 	} else if err := json.Unmarshal(resourceDesc, createClusterRequest); err == nil {
 		return &gcpGKE{}, nil
 	} else if err := json.Unmarshal(resourceDesc, insertForwardingRuleRequest); err == nil {
@@ -157,12 +157,12 @@ func getResourceHandlerFromDescription(resourceDesc []byte) (iGCPResourceHandler
 
 // Gets network information about a resource and confirms it is in the correct namespace
 // Returns the subnet URL and resource ID (instance ID or cluster ID, not URL since this is used for firewall rule naming)
-func GetResourceNetworkInfo(ctx context.Context, instancesClient *compute.InstancesClient, clusterClient *container.ClusterManagerClient, resourceInfo *resourceInfo) (*string, *string, error) {
+func GetResourceNetworkInfo(ctx context.Context, instancesClient *compute.InstancesClient, forwardingRulesClient *compute.ForwardingRulesClient, clusterClient *container.ClusterManagerClient, resourceInfo *resourceInfo) (*string, *string, error) {
 	if resourceInfo.Namespace == "" {
 		return nil, nil, fmt.Errorf("namespace is empty")
 	}
 
-	handler, err := getResourceHandlerWithClient(resourceInfo.ResourceType, instancesClient, clusterClient)
+	handler, err := getResourceHandlerWithClient(resourceInfo.ResourceType, instancesClient, forwardingRulesClient, clusterClient)
 	if err != nil {
 		return nil, nil, fmt.Errorf("unable to get resource handler: %w", err)
 	}
@@ -191,8 +191,8 @@ func IsValidResource(ctx context.Context, resource *paragliderpb.CreateResourceR
 }
 
 // Read the resource description and provision the resource
-func ReadAndProvisionResource(ctx context.Context, resource *paragliderpb.CreateResourceRequest, subnetName string, resourceInfo *resourceInfo, instanceClient *compute.InstancesClient, clusterClient *container.ClusterManagerClient, firewallsClient *compute.FirewallsClient, additionalAddrSpaces []string) (string, string, error) {
-	handler, err := getResourceHandlerWithClient(resourceInfo.ResourceType, instanceClient, clusterClient)
+func ReadAndProvisionResource(ctx context.Context, resource *paragliderpb.CreateResourceRequest, subnetName string, resourceInfo *resourceInfo, instanceClient *compute.InstancesClient, forwardingRulesClient *compute.ForwardingRulesClient, clusterClient *container.ClusterManagerClient, firewallsClient *compute.FirewallsClient, additionalAddrSpaces []string) (string, string, error) {
+	handler, err := getResourceHandlerWithClient(resourceInfo.ResourceType, instanceClient, forwardingRulesClient, clusterClient)
 	if err != nil {
 		return "", "", fmt.Errorf("unable to get resource handler: %w", err)
 	}
@@ -201,7 +201,7 @@ func ReadAndProvisionResource(ctx context.Context, resource *paragliderpb.Create
 
 // Type defition for supported resources
 type supportedGCPResourceClient interface {
-	compute.InstancesClient | container.ClusterManagerClient
+	compute.InstancesClient | compute.ForwardingRulesClient | container.ClusterManagerClient
 }
 
 // Interface to implement to support a resource
@@ -502,7 +502,7 @@ func (r *gcpGKE) fromResourceDecription(resourceDesc []byte) (*containerpb.Creat
 
 // GCP forwardingRule resource handler
 type gcpForwaringdRule struct {
-	gcpResourceHandler[compute.InstancesClient]
+	gcpResourceHandler[compute.ForwardingRulesClient]
 }
 
 // Get the resource information for a GCP forwardingRule
@@ -512,19 +512,49 @@ func (r *gcpForwaringdRule) getResourceInfo(ctx context.Context, resource *parag
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse resource description: %w", err)
 	}
-	return &resourceInfo{Zone: "foo-zone", NumAdditionalAddressSpaces: 1, ResourceType: forwardingRuleTypeName}, nil
+	return &resourceInfo{Region: insertForwardingRuleRequest.Region, NumAdditionalAddressSpaces: 1, ResourceType: forwardingRuleTypeName}, nil
 	//return &resourceInfo{Zone: insertInstanceRequest.Zone, NumAdditionalAddressSpaces: r.getNumberAddressSpacesRequired(), ResourceType: instanceTypeName}, nil
+}
+
+// Parse the resource description and return the instance request
+func (r *gcpForwaringdRule) fromResourceDecription(resourceDesc []byte) (*computepb.InsertForwardingRuleRequest, error) {
+	insertForwardingRuleRequest := &computepb.InsertForwardingRuleRequest{}
+	err := json.Unmarshal(resourceDesc, insertForwardingRuleRequest)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse resource description: %w", err)
+	}
+	return insertForwardingRuleRequest, nil
+}
+
+// Create a GCP instance with network settings
+// Returns the instance URL and instance IP
+func (r *gcpForwaringdRule) createWithNetwork(ctx context.Context, fwRule *computepb.InsertForwardingRuleRequest, subnetName string, resourceInfo *resourceInfo, firewallsClient *compute.FirewallsClient) (string, string, error) {
+	// Set project and name
+	fwRule.Project = resourceInfo.Project
+	fwRule.ForwardingRuleResource.Name = proto.String(resourceInfo.Name)
+
+	// Insert forwarding rule
+	insertForwardingRuleOp, err := r.client.Insert(ctx, fwRule)
+	if err != nil {
+		return "", "", fmt.Errorf("unable to insert forwarding rule: %w", err)
+	}
+	if err = insertForwardingRuleOp.Wait(ctx); err != nil {
+		return "", "", fmt.Errorf("unable to wait for the operation: %w", err)
+	}
+
+	return "", "10.10.10.10", nil
+	//return getInstanceUrl(resourceInfo.Project, resourceInfo.Zone, instanceName), *getInstanceResp.NetworkInterfaces[0].NetworkIP, nil
 }
 
 // Read and provision a GCP forwardingRule
 func (r *gcpForwaringdRule) readAndProvisionResource(ctx context.Context, resource *paragliderpb.CreateResourceRequest, subnetName string, resourceInfo *resourceInfo, firewallsClient *compute.FirewallsClient, additionalAddrSpaces []string) (string, string, error) {
 	print("In gcpForwaringdRule.readAndProvisionResource")
-	// vm, err := r.fromResourceDecription(resource.Description)
-	// if err != nil {
-	// 	return "", "", err
-	// }
-	// return r.createWithNetwork(ctx, vm, subnetName, resourceInfo, firewallsClient)
-	return "/fake/url/foo", "10.10.10.10", nil
+	fw, err := r.fromResourceDecription(resource.Description)
+	if err != nil {
+		return "", "", err
+	}
+	return r.createWithNetwork(ctx, fw, subnetName, resourceInfo, firewallsClient)
+	//return "/fake/url/foo", "10.10.10.10", nil
 }
 
 // getInstanceUrl returns a fully qualified URL for an instance
