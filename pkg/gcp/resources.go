@@ -33,9 +33,10 @@ import (
 )
 
 const (
-	clusterTypeName   = "cluster"
-	instanceTypeName  = "instance"
-	clusterNameFormat = "projects/%s/locations/%s/clusters/%s"
+	clusterTypeName        = "cluster"
+	instanceTypeName       = "instance"
+	forwardingRuleTypeName = "forwardingRule"
+	clusterNameFormat      = "projects/%s/locations/%s/clusters/%s"
 )
 
 type resourceInfo struct {
@@ -110,6 +111,8 @@ func parseResourceUrl(resourceUrl string) (*resourceInfo, error) {
 		return &resourceInfo{Project: parsedResourceId["projects"], Zone: parsedResourceId["zones"], Region: getRegionFromZone(parsedResourceId["zones"]), Name: name, ResourceType: instanceTypeName}, nil
 	} else if name, ok := parsedResourceId["clusters"]; ok {
 		return &resourceInfo{Project: parsedResourceId["projects"], Zone: parsedResourceId["locations"], Region: getRegionFromZone(parsedResourceId["locations"]), Name: name, ResourceType: clusterTypeName}, nil
+	} else if name, ok := parsedResourceId["services"]; ok {
+		return &resourceInfo{Project: parsedResourceId["projects"], Zone: parsedResourceId["zones"], Region: getRegionFromZone(parsedResourceId["zones"]), Name: name, ResourceType: forwardingRuleTypeName}, nil
 	}
 	return nil, fmt.Errorf("unable to parse resource URL")
 }
@@ -124,6 +127,10 @@ func getResourceHandlerWithClient(resourceType string, instancesClient *compute.
 		handler := &gcpGKE{}
 		handler.client = clusterClient
 		return handler, nil
+	} else if resourceType == forwardingRuleTypeName {
+		handler := &gcpForwaringdRule{}
+		handler.client = instancesClient
+		return handler, nil
 	} else {
 		return nil, fmt.Errorf("unknown resource type")
 	}
@@ -133,11 +140,14 @@ func getResourceHandlerWithClient(resourceType string, instancesClient *compute.
 func getResourceHandlerFromDescription(resourceDesc []byte) (iGCPResourceHandler, error) {
 	insertInstanceRequest := &computepb.InsertInstanceRequest{}
 	createClusterRequest := &containerpb.CreateClusterRequest{}
+	insertForwardingRuleRequest := &computepb.InsertForwardingRuleRequest{}
 	err := json.Unmarshal(resourceDesc, insertInstanceRequest)
 	if err == nil && insertInstanceRequest.InstanceResource != nil {
 		return &gcpInstance{}, nil
 	} else if err := json.Unmarshal(resourceDesc, createClusterRequest); err == nil {
 		return &gcpGKE{}, nil
+	} else if err := json.Unmarshal(resourceDesc, insertForwardingRuleRequest); err == nil {
+		return &gcpInstance{}, nil
 	} else {
 		return nil, fmt.Errorf("resource description contains unknown GCP resource")
 	}
@@ -486,6 +496,33 @@ func (r *gcpGKE) fromResourceDecription(resourceDesc []byte) (*containerpb.Creat
 		return nil, fmt.Errorf("network settings (subnets and address spaces) should not be specified")
 	}
 	return createClusterRequest, nil
+}
+
+// GCP forwardingRule resource handler
+type gcpForwaringdRule struct {
+	gcpResourceHandler[compute.InstancesClient]
+}
+
+// Get the resource information for a GCP forwardingRule
+func (r *gcpForwaringdRule) getResourceInfo(ctx context.Context, resource *paragliderpb.CreateResourceRequest) (*resourceInfo, error) {
+	insertForwardingRuleRequest := &computepb.InsertForwardingRuleRequest{}
+	err := json.Unmarshal(resource.Description, insertForwardingRuleRequest)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse resource description: %w", err)
+	}
+	return &resourceInfo{Zone: "foo-zone", NumAdditionalAddressSpaces: 1, ResourceType: forwardingRuleTypeName}, nil
+	//return &resourceInfo{Zone: insertInstanceRequest.Zone, NumAdditionalAddressSpaces: r.getNumberAddressSpacesRequired(), ResourceType: instanceTypeName}, nil
+}
+
+// Read and provision a GCP forwardingRule
+func (r *gcpForwaringdRule) readAndProvisionResource(ctx context.Context, resource *paragliderpb.CreateResourceRequest, subnetName string, resourceInfo *resourceInfo, firewallsClient *compute.FirewallsClient, additionalAddrSpaces []string) (string, string, error) {
+	print("In gcpForwaringdRule.readAndProvisionResource")
+	// vm, err := r.fromResourceDecription(resource.Description)
+	// if err != nil {
+	// 	return "", "", err
+	// }
+	// return r.createWithNetwork(ctx, vm, subnetName, resourceInfo, firewallsClient)
+	return "/fake/url/foo", "10.10.10.10", nil
 }
 
 // getInstanceUrl returns a fully qualified URL for an instance
