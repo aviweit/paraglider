@@ -111,8 +111,8 @@ func parseResourceUrl(resourceUrl string) (*resourceInfo, error) {
 		return &resourceInfo{Project: parsedResourceId["projects"], Zone: parsedResourceId["zones"], Region: getRegionFromZone(parsedResourceId["zones"]), Name: name, ResourceType: instanceTypeName}, nil
 	} else if name, ok := parsedResourceId["clusters"]; ok {
 		return &resourceInfo{Project: parsedResourceId["projects"], Zone: parsedResourceId["locations"], Region: getRegionFromZone(parsedResourceId["locations"]), Name: name, ResourceType: clusterTypeName}, nil
-	} else if name, ok := parsedResourceId["services"]; ok {
-		return &resourceInfo{Project: parsedResourceId["projects"], Zone: parsedResourceId["zones"], Region: getRegionFromZone(parsedResourceId["zones"]), Name: name, ResourceType: forwardingRuleTypeName}, nil
+	} else if name, ok := parsedResourceId["forwardingRules"]; ok {
+		return &resourceInfo{Project: parsedResourceId["projects"], Region: parsedResourceId["regions"], Name: name, ResourceType: forwardingRuleTypeName}, nil
 	}
 	return nil, fmt.Errorf("unable to parse resource URL")
 }
@@ -141,16 +141,12 @@ func getResourceHandlerFromDescription(resourceDesc []byte) (iGCPResourceHandler
 	insertInstanceRequest := &computepb.InsertInstanceRequest{}
 	createClusterRequest := &containerpb.CreateClusterRequest{}
 	insertForwardingRuleRequest := &computepb.InsertForwardingRuleRequest{}
-	err := json.Unmarshal(resourceDesc, insertInstanceRequest)
-	if err == nil && insertInstanceRequest.InstanceResource != nil {
+	if err := json.Unmarshal(resourceDesc, insertInstanceRequest); err == nil && insertInstanceRequest.InstanceResource != nil {
 		return &gcpInstance{}, nil
+	} else if err := json.Unmarshal(resourceDesc, createClusterRequest); err == nil && createClusterRequest.Cluster != nil {
+		return &gcpGKE{}, nil
 	} else if err := json.Unmarshal(resourceDesc, insertForwardingRuleRequest); err == nil && insertForwardingRuleRequest.ForwardingRuleResource != nil {
 		return &gcpForwaringdRule{}, nil
-	} else if err := json.Unmarshal(resourceDesc, createClusterRequest); err == nil {
-		return &gcpGKE{}, nil
-		// TODO: !!!!!!!!!!!!! REMOVE !!!!!!!!!!!!
-	} else if err := json.Unmarshal(resourceDesc, insertForwardingRuleRequest); err == nil {
-		return &gcpInstance{}, nil
 	} else {
 		return nil, fmt.Errorf("resource description contains unknown GCP resource")
 	}
